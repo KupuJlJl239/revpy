@@ -1,10 +1,46 @@
 [project]
 name = "revpy-lang"
 version = "0.0.0"
-description = "Add your description here"
+description = "A reversible programming language embedded in Python."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
+
+classifiers = [
+    # Статус разработки
+    "Development Status :: 4 - Beta",  # или 5 - Production/Stable
+
+    # Для кого предназначен пакет
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+
+    # Язык и версии
+    "Programming Language :: Python :: 3",
+
+    # Независимость от ОС
+    "Operating System :: OS Independent",
+
+    # Основные темы
+    "Topic :: Software Development :: Libraries :: Python Modules", # базовый для любой библиотеки
+    "Topic :: Software Development :: Code Generators",           # генераторы кода
+    "Topic :: Scientific/Engineering",                            # акцент на науке
+]
+
+
+authors = [
+  { name="Kirill Sokolov", email="kirill141103@yandex.ru" },
+]
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+
+
+
+
+[project.urls]
+Homepage = "https://github.com/KupuJlJl239/revpy"
+Issues = "https://github.com/KupuJlJl239/revpy/issues"
+
+
 
 [build-system]
 requires = ["uv_build>=0.12.24,<0.13.0"]

@@ -1,5 +1,7 @@
 # RevPy
 
+[English](https://github.com/KupuJlJl239/revpy/blob/main/docs/README.en.md) | **Русский** |
+
 
 **Обратимый язык программирования, встроенный в Python.**
 
@@ -64,6 +66,7 @@ pip install revpy-lang
     - [`if/fi`](#if)
     - [`while/elihw`](#while)
 - [API](#api)
+- [больше примеров](https://github.com/KupuJlJl239/revpy/tree/main/examples)
 
 
 # Ключевые понятия

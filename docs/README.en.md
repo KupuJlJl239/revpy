@@ -1,5 +1,9 @@
 # RevPy
 
+
+**English** | [Русский](https://github.com/KupuJlJl239/revpy/blob/main/docs/README.ru.md)
+
+
 **A reversible programming language embedded in Python.**
 
 The `RevPy` library lets you write Python functions that can be executed in two directions: **forward** and **backward**. You write an ordinary Python function (but following certain rules), and the `@reversible` decorator compiles it into a pair of forward and reverse functions. So you don't have to write the reverse function by hand — it's generated automatically.
@@ -54,6 +58,7 @@ pip install revpy-lang
     - [`if/fi`](#if)
     - [`while/elihw`](#while)
 - [API](#api)
+- [more examples](https://github.com/KupuJlJl239/revpy/tree/main/examples)
 
 # Key concepts
 <p id="base">  </p>
