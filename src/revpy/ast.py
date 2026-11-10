@@ -1,227 +1,11 @@
 from __future__ import annotations
+import ast
 from dataclasses import dataclass
-from typing import Iterable, Any
 from copy import deepcopy
-import ast, inspect
-import types
-import sys
 
 
-
-__all__ = [
-    'ReversibleFunction',
-    'reversible',
-
-    'fi','elihw',
-
-    'ReversibilityError',
-    'reversibility_assert',
-    'RevpyCompilationError',
-]
-
-
-def fi(reverse_condition: bool):
-    """
-    Stub function for the if construct
-
-    if condition:
-        ...
-    else:
-        ...
-    fi(reverse_condition)
-    
-    :param reverse_condition: the condition that must be true at the moment of exiting the if branch and false at the moment of exiting the else branch. If fi is not provided, then by default reverse_condition = condition.
-    """
-    pass
-
-
-def elihw(reverse_condition: bool):
-    """
-    Stub function for the while construct
-
-    while condition:
-        ...
-    elihw(reverse_condition)
-    
-    :param reverse_condition: the condition that must be false at the moment of entering the loop and true every time the end of the loop is reached
-    :type reverse_condition: bool
-    """
-    pass
-
-
-
-
-
-class ReversibleFunction:
-    """
-    Класс-обёртка над парой функций f и f_rev, объединяющий их в одну обратимую функцию.
-
-    Первый аргумент функций считается уничтожаемым значением, остальные -- параметрами (которые не уничтожаются).
-    """
-    def __init__(self, f, f_rev, args=(), kwargs=None):
-        self.f = f
-        self.f_rev = f_rev
-
-        self.args = args
-        self.kwargs = kwargs if kwargs is not None else {}
-        self.__signature__ = inspect.signature(f)
-
-    def __call__(self, *args, **kwargs):
-        return ReversibleFunction(self.f, self.f_rev, self.args + args, self.kwargs | kwargs)
-
-    @property
-    def rev(self):
-        return ReversibleFunction(self.f_rev, self.f, self.args, self.kwargs)
-    
-    def __getitem__(self, input):
-        return self.f(input, *self.args, **self.kwargs)
-    
-    @property
-    def src(self):
-        return self.f.src
-
-
-
-@dataclass
-class RevpyCompilationError(Exception):
-    """
-    Base class for reversibility errors at runtime.
-    """
-    msg: str
-
-
-class ReversibilityError(Exception):
-    """
-    Base class for reversibility errors at the code analysis stage.
-    """
-    pass
-
-
-def reversibility_assert(condition, message=''):
-    """
-    Кидает исключение ReversibilityError в случае, если condition ложно.
-
-    Используйте, для проверок условий обратимости. 
-    Это исключительно вспомогательная функция, можно использовать что угодно вместо неё.
-    
-    :param condition: Description
-    :param message: Description
-    """
-    if not condition:
-        raise ReversibilityError(message)
-
-
-
-revpy_assert_name = 'reversibility_assert'
-
-
-############################
-###   LIFETIMES CHECKS   ###
-############################
-
-@dataclass
-class VariableSideUsage:
-    name: str
-    exists: bool
-    usage: str
-
-    def match(self, other: VariableSideUsage) -> None:
-        assert self.name == other.name
-        if self.exists != other.exists:
-            raise RevpyCompilationError(f"Lifetime error: variable '{self.name}'\n\t--> {self.usage}\n\t--> {other.usage} ")
-
-@dataclass
-class VariableUsage:
-    start: VariableSideUsage
-    end: VariableSideUsage 
-    own: bool
-
-    def __add__(self, other: VariableUsage) -> VariableUsage:
-        self.end.match(other.start)
-        return VariableUsage(self.start, other.end, self.own | other.own)
-    
-    def __or__(self, other: VariableUsage) -> VariableUsage:
-        self.start.match(other.start)
-        self.end.match(other.end)
-        return VariableUsage(self.start, other.end, self.own | other.own)
-    
-    @property
-    def rev(self):
-        return VariableUsage(start=self.end, end=self.start, own=self.own)
-    
-    def check(self) -> VariableUsage:
-        assert self.start.name == self.end.name
-        if self.start.exists != self.end.exists:
-            raise RevpyCompilationError(f"Lifetime error: variable '{self.start.name}' must both exist or both not exist\n\t--> {self.start.usage}\n\t--> {self.end.usage} ")
-        return self
-
-
-
-def unite_dicts(A, B, unary_op, binary_op):
-    common = {k: binary_op(A[k], B[k]) for k in A.keys() & B.keys()}
-    non_common = {k: unary_op(v) for k, v in (A | B).items() if not k in (A.keys() & B.keys())}
-    return common | non_common
-
-@dataclass
-class Signature:
-    dct: dict[str, VariableUsage]
-
-    def __add__(self, other: Signature) -> Signature:
-        return Signature(unite_dicts(self.dct, other.dct, unary_op=lambda x: x, binary_op=VariableUsage.__add__))
-    
-    def __or__(self, other: Signature) -> Signature:
-        return Signature(unite_dicts(self.dct, other.dct, unary_op=VariableUsage.check, binary_op=VariableUsage.__or__))
-    
-    @staticmethod
-    def from_line(input: Iterable[str], output: Iterable[str], capture: Iterable[str], line: str) -> Signature:
-        IN = set(input)
-        OUT = set(output)
-        if len(IN) != len(input):
-            raise RevpyCompilationError(f"Some destroyed names repeat! Line:\n{line}\n")
-        if len(OUT) != len(output):
-            raise RevpyCompilationError(f"Some created names repeat! Line:\n{line}\n")
-        C = set(capture)
-        if not C.isdisjoint(IN):
-            raise RevpyCompilationError(f"Some names are destroyed and captured at the same time: {C & IN}! Line:\n{line}\n")
-        if not C.isdisjoint(OUT):
-            raise RevpyCompilationError(f"Some names are created and captured at the same time: {C & OUT}! Line:\n{line}\n")\
-        
-        return Signature({
-            k: VariableUsage(
-                start=VariableSideUsage(name=k, exists=k in IN | C, usage=line),
-                end=VariableSideUsage(name=k, exists=k in OUT | C, usage=line),
-                own=k not in C
-            ) 
-            for k in IN | OUT | C   # k -- имя переменной
-        })
-    
-    @property
-    def rev(self):
-        return Signature({k: v.rev for k, v in self.dct.items()})
-    
-    @property
-    def names_input(self):
-        return set([k for k, v in self.dct.items()  if v.start.exists and v.own])
-    
-    @property
-    def names_output(self):
-        return set([k for k, v in self.dct.items()  if v.end.exists and v.own])
-    
-    @property
-    def names_capture(self):
-        return set([k for k, v in self.dct.items() if not v.own])
-    
-    @property
-    def names_local(self):
-        return set([k for k, v in self.dct.items()  if v.own])
-    
-    @property
-    def names_all(self):
-        return set([k for k, v in self.dct.items() ])
-
-
-
-
+from .base import RevpyCompilationError, reversibility_assert
+from .lifetimes import Signature
 
 
 
@@ -230,8 +14,10 @@ class Signature:
 #####################################
 
 
+REVPY_ASSERT_NAME = reversibility_assert.__name__
 
-class ReversibleAstExpr:
+
+class ReversibleAst:
     """ 
     Некоторый кусок обратимого кода.
     """
@@ -245,14 +31,14 @@ class ReversibleAstExpr:
         return ast.fix_missing_locations(self._to_ast(*args, **kwargs))
     
     @property
-    def rev(self) -> ReversibleAstExpr:
+    def rev(self) -> ReversibleAst:
         """
         Возвращает обратный кусок кода.
         """
         raise NotImplementedError()
     
     @staticmethod
-    def from_ast(tree: ast.AST) -> ReversibleAstExpr:
+    def from_ast(tree: ast.AST) -> ReversibleAst:
         """
         Парсит обычный ast в своё внутреннее представление.
         """
@@ -276,7 +62,7 @@ def ast_reversibility_assert(condition: ast.AST) -> ast.AST:
     message = f"reversibility_assert is False: '{ast.unparse(condition)}'"
     return ast.Expr(
         value=ast.Call(
-            func=ast.Name(id=revpy_assert_name, ctx=ast.Load()),
+            func=ast.Name(id=REVPY_ASSERT_NAME, ctx=ast.Load()),
             args=[
                 condition, 
                 ast.Constant(value=message)
@@ -296,7 +82,7 @@ def ast_is_none(value: ast.AST) -> ast.AST:
 
 
     
-def parse_ast_args(args) -> set[str]:
+def parse_ast_args(args, allow_repeated=False) -> set[str]:
     if isinstance(args, ast.Name):
         assert isinstance(args.id, str)
         return set([args.id])
@@ -304,7 +90,7 @@ def parse_ast_args(args) -> set[str]:
         res = set()
         for it in args.elts:
             A = parse_ast_args(it)
-            if not res.isdisjoint(A):
+            if not allow_repeated and not res.isdisjoint(A):
                 raise RevpyCompilationError(f"Arguments of reversible function must not contain repeated names! '{ast.unparse(args)}'")
             res = res | A
         return res
@@ -349,7 +135,7 @@ class ReversibleAstArguments:
 
 
 @dataclass 
-class ReversibleAstInstruction(ReversibleAstExpr):
+class ReversibleAstInstruction(ReversibleAst):
     """
     Представление одной строчки кода такого вида:
 
@@ -434,7 +220,7 @@ def get_expr_signature(expr: ast.AST, template: str = "{}") -> Signature:
 
 
 @dataclass
-class ReversibleAstIf(ReversibleAstExpr):
+class ReversibleAstIf(ReversibleAst):
     if_test: ast.AST 
     fi_test: ast.AST
     body: ReversibleAstBlock
@@ -474,7 +260,7 @@ class ReversibleAstIf(ReversibleAstExpr):
 
 
 @dataclass 
-class ReversibleAstWhile(ReversibleAstExpr):
+class ReversibleAstWhile(ReversibleAst):
     while_test: ast.AST
     elihw_test: ast.AST
     body: ReversibleAstBlock
@@ -512,6 +298,61 @@ class ReversibleAstWhile(ReversibleAstExpr):
         return ReversibleAstWhile(self.elihw_test, self.while_test, self.body.rev, self._signature.rev)
 
 
+@dataclass 
+class ReversibleAstFor(ReversibleAst):
+    target: ast.AST
+    iter: ast.AST
+    body: ReversibleAstBlock
+    _signature: Signature
+
+    @staticmethod
+    def from_ast(for_ast: ast.AST) -> ReversibleAstWhile:
+        assert isinstance(for_ast, ast.For)
+
+        if len(for_ast.orelse) != 0:
+            raise RevpyCompilationError("'for' cycle must not have 'else' in reversible python!")
+
+        vars = parse_ast_names(for_ast.target) | parse_ast_names(for_ast.iter)
+
+        for_signature = Signature.from_line(input=[], output=[], capture=vars, line=f'for {ast.unparse(for_ast.target)} in {ast.unparse(for_ast.iter)}:')
+        
+
+        body = ReversibleAstBlock.from_ast(for_ast.body)
+        signature = for_signature + body.signature
+
+        for v in signature.dct.values():
+            v.check()  # проверяем, что переменная имеет одинаковый статус существования по обеим сторонам блока
+
+        if not vars.issubset(signature.names_capture):
+            raise RevpyCompilationError(f"variables {vars - signature.names_capture} are iterated in for loop, but they are destroyed or created inside the body of the loop (which is prohibited!)")
+
+        return ReversibleAstFor(for_ast.target, for_ast.iter, body, signature)
+    
+    def to_ast(self) -> list[ast.AST]:
+        return [
+            ast.For(
+                target=self.target, 
+                iter=self.iter,
+                body=self.body.to_ast(),
+                orelse=[],
+            )
+        ]
+    
+    @property
+    def rev(self):
+        if isinstance(self.iter, ast.Call) and isinstance(self.iter.func, ast.Name) and self.iter.func.id == 'reversed':
+            if not (len(self.iter.args) == 1 and len(self.iter.keywords) == 0):
+                raise RevpyCompilationError(f"'reversed' must have 1 positional argument (got {len(self.iter.args)}) and 0 keyword arguments (got {len(self.iter.keywords)})")
+            iter = self.iter.args[0]
+        else:
+            iter = ast.Call(
+                func=ast.Name(id='reversed', ctx=ast.Load()),
+                args=[self.iter],
+                keywords=[],
+            )
+        return ReversibleAstFor(self.target, iter, self.body.rev, self._signature.rev)
+
+
 def parse_condition(fi_expr: ast.AST, name: str) -> ast.AST | None:
     if not isinstance(fi_expr, ast.Expr):
         return None
@@ -527,9 +368,9 @@ def parse_condition(fi_expr: ast.AST, name: str) -> ast.AST | None:
     return fi_call.args[0]
 
 @dataclass
-class ReversibleAstBlock(ReversibleAstExpr):
+class ReversibleAstBlock(ReversibleAst):
 
-    body: list[ReversibleAstExpr]
+    body: list[ReversibleAst]
     s: Signature
 
     @staticmethod
@@ -540,7 +381,7 @@ class ReversibleAstBlock(ReversibleAstExpr):
         while idx < len(body):
             tree = body[idx]
             if isinstance(tree, ast.Expr) or isinstance(tree, ast.Assign) or isinstance(tree, ast.Assert) or isinstance(tree, ast.Raise) or isinstance(tree, ast.Pass):
-                expr: ReversibleAstExpr = ReversibleAstInstruction.from_ast(tree)
+                expr: ReversibleAst = ReversibleAstInstruction.from_ast(tree)
 
             elif isinstance(tree, ast.If):
                 fi_test = None
@@ -561,6 +402,10 @@ class ReversibleAstBlock(ReversibleAstExpr):
                     raise RevpyCompilationError(f"Every while must have elihw immidiately after body of the cycle!")
                 
                 expr = ReversibleAstWhile.from_ast(while_ast=tree, elihw_test=elihw_test)
+
+            elif isinstance(tree, ast.For):
+                expr: ReversibleAst = ReversibleAstFor.from_ast(tree)
+
             else:
                 raise RevpyCompilationError(f"Construction {tree} is not allowed in RevPy")
             
@@ -592,7 +437,7 @@ class ReversibleAstBlock(ReversibleAstExpr):
     
 
 @dataclass
-class ReversibleAstFunctionDef(ReversibleAstExpr):
+class ReversibleAstFunctionDef(ReversibleAst):
 
     name: str
     args: ast.arguments
@@ -674,140 +519,3 @@ class ReversibleAstFunctionDef(ReversibleAstExpr):
     @property
     def signature(self) -> Signature:
         return self._signature
-
-
-
-########################################
-###   COMPILATION OF GENERATED AST   ###
-########################################
-
-
-def _find_code(code: types.CodeType, name: str) -> types.CodeType | None:
-    for const in code.co_consts:
-        if isinstance(const, types.CodeType) and const.co_name == name:
-            return const
-    return None
-
-
-def compile_function(
-    function_def: ast.FunctionDef,
-    globals: dict[str, Any],
-    nonlocals: dict[str, types.CellType],
-) -> types.FunctionType:
-    factory_name = f"__factory_{function_def.name}"
-    factory_def = ast.FunctionDef(
-        name=factory_name,
-        args=ast.arguments(
-            posonlyargs=[],
-            args=[ast.arg(arg=n) for n in nonlocals.keys()],
-            kwonlyargs=[], kw_defaults=[], defaults=[],
-        ),
-        body=[
-            function_def,
-            ast.Return(value=ast.Name(id=function_def.name, ctx=ast.Load())),
-        ],
-        decorator_list=[],
-    )
-    module = ast.Module(body=[factory_def], type_ignores=[])
-    ast.fix_missing_locations(module)
-
-    # 1) Компилируем под тем же именем файла, что и оригинал — тогда
-    #    co_filename и co_firstlineno указывают на реальные строки,
-    #    и inspect.getsource / трейсбеки работают.
-    filename = globals.get("__file__", "<generated>")
-    module_code = compile(module, filename, "exec")
-
-    factory_code = _find_code(module_code, factory_name)
-    func_code = _find_code(factory_code, function_def.name)
-
-    # 2) Правим qualname, чтобы трейсбек показывал имя функции,
-    #    а не "__factory_f.<locals>.f".
-    if sys.version_info >= (3, 11) and func_code.co_qualname != function_def.name:
-        func_code = func_code.replace(co_qualname=function_def.name)
-
-    closure = tuple(nonlocals[name] for name in func_code.co_freevars) or None
-
-    # 3) Окружение для вычисления дефолтов: globals + значения из ячеек.
-    env: dict[str, Any] = dict(globals)
-    for name, cell in nonlocals.items():
-        try:
-            env[name] = cell.cell_contents
-        except ValueError:
-            pass  # пустая ячейка — дефолт, ссылающийся на неё, упадёт при eval
-
-    defaults: tuple[Any, ...] | None = None
-    if function_def.args.defaults:
-        defaults = tuple(
-            eval(compile(ast.Expression(d), filename, "eval"), env)
-            for d in function_def.args.defaults
-        )
-
-    func = types.FunctionType(
-        func_code,
-        globals,
-        function_def.name,
-        defaults,
-        closure,
-    )
-
-    # 4) Keyword-only дефолты.
-    kw_defaults = function_def.args.kw_defaults
-    if kw_defaults and any(d is not None for d in kw_defaults):
-        func.__kwdefaults__ = {
-            arg.arg: eval(compile(ast.Expression(d), filename, "eval"), env)
-            for arg, d in zip(function_def.args.kwonlyargs, kw_defaults)
-            if d is not None
-        }
-
-    return func
-
-
-###########################
-###   FINAL DECORATOR   ###
-###########################
-
-def get_nonlocals(function) -> dict[str, types.CellType]:
-    orig_freevars = function.__code__.co_freevars
-    orig_cells = dict(zip(orig_freevars, function.__closure__ or ()))
-    return orig_cells
-
-def get_function_def(function):
-    source = inspect.getsource(function)
-    tree = ast.parse(source)  # возвращает Module
-    return tree.body[0]
-
-
-def reversible(function: types.FunctionType) -> ReversibleFunction:
-    """
-    Compiles a function into reversible function.
-
-    - the first argument is considered the _input_
-    - other arguments are considered the _parameters_ (i.e. captured values)
-    - last line must be 'return \<variable name\>', and this variable is considered the _output_
-    
-    :param function: a function written with the revpy rules
-    :return reversible_function: an instance of the class ReversibleFunction
-    """
-    f_def = get_function_def(function)
-    globals = function.__globals__
-    nonlocals = get_nonlocals(function) 
-
-    if not revpy_assert_name is globals:
-        nonlocals = nonlocals | {
-            revpy_assert_name: types.CellType(reversibility_assert)
-        }
-
-    try:
-        rf_def = ReversibleAstFunctionDef.from_ast(f_def)
-    except RevpyCompilationError as e:
-        raise RevpyCompilationError(e.msg) from None
-
-    f_def = rf_def.to_ast()
-    f = compile_function(f_def, globals, nonlocals)
-    f.src = ast.unparse(f_def)
-
-    f_rev_def = rf_def.rev.to_ast()
-    f_rev = compile_function(f_rev_def, globals, nonlocals)
-    f_rev.src = ast.unparse(f_rev_def)
-
-    return ReversibleFunction(f=f, f_rev=f_rev)
