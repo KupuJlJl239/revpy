@@ -309,22 +309,26 @@ class ReversibleAstFor(ReversibleAst):
     def from_ast(for_ast: ast.AST) -> ReversibleAstWhile:
         assert isinstance(for_ast, ast.For)
 
+        for_line = f'for {ast.unparse(for_ast.target)} in {ast.unparse(for_ast.iter)}:'
+
         if len(for_ast.orelse) != 0:
             raise RevpyCompilationError("'for' cycle must not have 'else' in reversible python!")
 
-        vars = parse_ast_names(for_ast.target) | parse_ast_names(for_ast.iter)
-
-        for_signature = Signature.from_line(input=[], output=[], capture=vars, line=f'for {ast.unparse(for_ast.target)} in {ast.unparse(for_ast.iter)}:')
-        
+        vars = parse_ast_names(for_ast.target)
+        names = parse_ast_names(for_ast.iter)
 
         body = ReversibleAstBlock.from_ast(for_ast.body)
-        signature = for_signature + body.signature
+
+        bad_vars = (vars | names) & body.signature.names_local   # переменные, участвующие в заглавии цикла, и создаваемые / уничтожаемые внутри него
+        if len(bad_vars) > 0:
+            raise RevpyCompilationError(f"variables {bad_vars} are iterated in 'for' loop, but they are destroyed or created inside the body of the loop (which is prohibited!)\n\t> {for_line}")
+
+        for_start_signature = Signature.from_line(input=[], output=vars, capture=names, line=for_line)
+        for_end_signature = Signature.from_line(input=vars, output=[], capture=names, line=for_line)
+        signature = for_start_signature + body.signature + for_end_signature
 
         for v in signature.dct.values():
             v.check()  # проверяем, что переменная имеет одинаковый статус существования по обеим сторонам блока
-
-        if not vars.issubset(signature.names_capture):
-            raise RevpyCompilationError(f"variables {vars - signature.names_capture} are iterated in for loop, but they are destroyed or created inside the body of the loop (which is prohibited!)")
 
         return ReversibleAstFor(for_ast.target, for_ast.iter, body, signature)
     
@@ -422,7 +426,7 @@ class ReversibleAstBlock(ReversibleAst):
         return ReversibleAstBlock(body=body, s=self.s.rev)
     
     @property
-    def signature(self):
+    def signature(self) -> Signature:
         return self.s
     
     def to_ast(self) -> list[ast.AST]:

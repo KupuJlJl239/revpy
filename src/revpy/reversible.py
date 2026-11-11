@@ -40,7 +40,7 @@ def reversible(function: FunctionType) -> ReversibleFunction:
     globals = function.__globals__
     nonlocals = get_nonlocals(function) 
 
-    if not REVPY_ASSERT_NAME is globals:
+    if not REVPY_ASSERT_NAME in globals and not REVPY_ASSERT_NAME in nonlocals:
         nonlocals = nonlocals | {
             REVPY_ASSERT_NAME: CellType(reversibility_assert)
         }

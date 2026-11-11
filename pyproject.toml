@@ -1,6 +1,6 @@
 [project]
 name = "revpy-lang"
-version = "0.0.0"
+version = "0.1.0"
 description = "A reversible programming language embedded in Python."
 readme = "README.md"
 requires-python = ">=3.9"
